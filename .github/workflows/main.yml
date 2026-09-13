@@ -47,3 +47,23 @@ jobs:
           while ($true) {
             Start-Sleep 300
           }
+
+              - name: Configure RDP Access
+      run: |
+        Write-Host "Configuring RDP access..." -ForegroundColor Green
+
+        # 1. Ensure the user is in the Remote Desktop Users group
+        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "runneradmin" -ErrorAction SilentlyContinue
+
+        # 2. Force enable RDP via registry
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+
+        # 3. Start and verify the Remote Desktop Service
+        Set-Service -Name "TermService" -StartupType Automatic
+        Start-Service -Name "TermService"
+
+        # 4. Create a firewall rule for RDP
+        New-NetFirewallRule -DisplayName "RDP-TCP-3389" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue
+
+        # 5. Final verification
+        Write-Host "RDP Configuration verified." -ForegroundColor Green
