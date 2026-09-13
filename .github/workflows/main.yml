@@ -12,29 +12,45 @@ jobs:
       - name: Configure RDP Service & User
         shell: powershell
         run: |
+          Write-Host "Enabling Remote Desktop..." -ForegroundColor Green
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          New-NetFirewallRule -DisplayName "RDP-TCP-3389" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue
+
+          Write-Host "Creating user account..." -ForegroundColor Green
           $runnerAdminPass = "WindowsRDP#2025"
           net user "runneradmin" $runnerAdminPass
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "runneradmin" -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Administrators" -Member "runneradmin" -ErrorAction SilentlyContinue
+
+          Write-Host "Ensuring TermService is running..." -ForegroundColor Green
+          Set-Service -Name "TermService" -StartupType Automatic
+          Start-Service -Name "TermService"
+
           echo "RDP_USER=runneradmin" >> $env:GITHUB_ENV
           echo "RDP_PASS=$runnerAdminPass" >> $env:GITHUB_ENV
-          
+
       - name: Install and Connect Tailscale
         shell: powershell
         run: |
+          Write-Host "Downloading Tailscale..." -ForegroundColor Green
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" -OutFile "tailscale-setup.exe"
           Start-Process -FilePath ".\tailscale-setup.exe" -ArgumentList "/S" -Wait
+          Write-Host "Connecting to Tailscale..." -ForegroundColor Green
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=github-runner-$env:GITHUB_RUN_ID
           $tsIP = $null
-          for ($i=1; $i -le 15; $i++){ 
+          for ($i=1; $i -le 15; $i++){
             $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
             if($tsIP){break}
-            Start-Sleep 4 
+            Start-Sleep 4
           }
-          if (-not $tsIP) { 
-            exit 1 
+          if (-not $tsIP) {
+            Write-Host "Failed to get Tailscale IP." -ForegroundColor Red
+            exit 1
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+          Write-Host "Tailscale IP: $tsIP" -ForegroundColor Green
 
       - name: Display Connection Details and Keep Alive
         shell: powershell
@@ -44,26 +60,9 @@ jobs:
           Write-Host "Username  : ${{ env.RDP_USER }}"
           Write-Host "Password  : ${{ env.RDP_PASS }}"
           Write-Host "=============================================="
+          Write-Host "Connect using RDP to the IP above."
+          Write-Host "Keep this workflow running to stay connected."
           while ($true) {
             Start-Sleep 300
+            Write-Host "Session still alive at $(Get-Date)" -ForegroundColor Green
           }
-
-              - name: Configure RDP Access
-      run: |
-        Write-Host "Configuring RDP access..." -ForegroundColor Green
-
-        # 1. Ensure the user is in the Remote Desktop Users group
-        Add-LocalGroupMember -Group "Remote Desktop Users" -Member "runneradmin" -ErrorAction SilentlyContinue
-
-        # 2. Force enable RDP via registry
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-
-        # 3. Start and verify the Remote Desktop Service
-        Set-Service -Name "TermService" -StartupType Automatic
-        Start-Service -Name "TermService"
-
-        # 4. Create a firewall rule for RDP
-        New-NetFirewallRule -DisplayName "RDP-TCP-3389" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Allow -ErrorAction SilentlyContinue
-
-        # 5. Final verification
-        Write-Host "RDP Configuration verified." -ForegroundColor Green
